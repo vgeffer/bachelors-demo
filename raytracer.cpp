@@ -1,7 +1,5 @@
 #include "raytracer.hpp"
 #include "lib/glpix.hpp"
-#include <cmath>
-#include <cstdlib>
 #include <iostream>
 
 using namespace glm; 
@@ -44,34 +42,37 @@ const char* gpu_pixel_func = R"(
 	  	return max(distA, -distB);
   	}
 
-  	float sceneSDF(vec3 p, float time) {
-	   return sphereSDF(p + vec3(0, sin(time), 0), vec3(0, 0, 0), 1.4);
+  	float sceneSDF(vec3 p) {
+	   	return intersectSDF(
+			boxSDF(p, vec3(0, 0, 0), vec3(1, 1, 1)),
+	   		sphereSDF(p + vec3(0, sin(time), 0), vec3(0, 0, 0), 1.4)
+		);
   	}
 
   	vec4 pixel() {
-		/*vec4 px = p0 + (p1 - p0) * uv.x
+		vec4 px = p0 + (p1 - p0) * uv.x
 					 + (p2 - p0) * uv.y;
 
-		ray r = ray(pos, px * view);
+		ray r = ray(pos, normalize(px * view));
 		float depth = 0;
 
 	  	for (float step = 0; step < 256; step++) {
 		  	vec3 point = r.origin.xyz + depth * r.dir.xyz;
-		  	float dist = sceneSDF(point, time);
+		  	float dist = sceneSDF(point);
 
 		  	if (dist < 0.1) 
-			  	return vec4(step / 255, 0, 0, 1);
+			  	return vec4(0, 1 - (step / 255), 0, 1);
 
 		  	depth += dist;
 		  	if (depth > 1000)
 			  	break;
-	  	}*/
+	  	}
 
-	  	return vec4(f, 0, 0, 1);
+	  	return vec4(0, 0, 0, 1);
   	}
 )";
 
-raytracer::raytracer() : glpix("RT-DEMO", 800, 600, false, gpu_pixel_func, sizeof(fdata)) {}
+raytracer::raytracer() : glpix("RT-DEMO", 1600, 1200, false, gpu_pixel_func, sizeof(fdata)) {}
 
 
 bool raytracer::create() {
@@ -125,49 +126,6 @@ bool raytracer::update(float delta) {
   	return true;
 }
 
-
-void raytracer::load_obj(const char* path) {
-
-  /*triangles.clear();
-  if (tri_indices != nullptr)
-	delete[] tri_indices;
-
-  ifstream obj_in = ifstream(path, std::ios::in);
-  if (!obj_in)
-	throw runtime_error("Cannot open " + string(path));
-		
-  std::string line;
-  vector<glm::vec4> vertices;
-
-  while (std::getline(obj_in, line))
-  {
-	if (line.substr(0,2)=="v ") {
-	  
-	  istringstream v(line.substr(2));
-	  float x,y,z;
-	  v >> x; v >> y; v >> z;
-
-	  vertices.emplace_back(x, y, z);
-	}
-	
-	else if(line.substr(0,2)=="f "){
-	  int a, b, c;
-	  const char* chh = line.c_str();
-	  sscanf (chh, "f %i %i %i", &a, &b, &c);
-	  
-	  tri t = {
-		vertices[a - 1], vertices[b - 1], vertices[c - 1],
-		(vertices[a - 1] + vertices[b - 1] + vertices[c - 1]) / 3.0f,
-		glpix::color(static_cast<uint32_t>(rand()) | 0xFF)
-	  };
-	  triangles.push_back(t);
-	}
-  }
-
-  tri_indices = new uint[triangles.size()];
-  for (int i = 0; i < triangles.size(); i++)
-	tri_indices[i] = i;*/
-}
 
 int main() {
   raytracer rt;

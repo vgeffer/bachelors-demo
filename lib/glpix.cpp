@@ -173,7 +173,7 @@ glpix::glpix(const std::string& name, int w, int h, bool fullscreen, const char*
 
         GLuint buffer_idx = glGetUniformBlockIndex(m_program, "frame_data");   
         glUniformBlockBinding(m_program, buffer_idx, 1);
-        glBindBufferBase(GL_UNIFORM_BUFFER, 2, m_frame_data_buffer); 
+        glBindBufferBase(GL_UNIFORM_BUFFER, 1, m_frame_data_buffer); 
         m_frame_data_buffer_size = frame_data_buffer_size;
     }
 

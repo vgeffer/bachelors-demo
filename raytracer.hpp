@@ -1,6 +1,5 @@
 #pragma once
 
-#include "bvh/primitives.hpp"
 #include "lib/glpix.hpp"
 #include <glm/glm.hpp>
 #include "camera.hpp"
@@ -24,7 +23,7 @@ class raytracer : public glpix {
     inline float randf() { return (static_cast<float>(rand() % 65536) / 65536.0f); }
 
 
-    float intersect_triangle(const ray& r, const tri& t);
+    /*float intersect_triangle(const ray& r, const tri& t);
     bool intersect_AABB(const ray& r, const glm::vec3& min, const glm::vec3& max);
 
     void build_bvh();
@@ -32,12 +31,12 @@ class raytracer : public glpix {
     void subdivide(bvnode& node);
     void load_obj(const char* path);
 
-    void draw_bvh(ray& r, const bvnode& root);
+    void draw_bvh(ray& r, const bvnode& root);*/
 
   private:
     camera m_c;
 
-    std::vector<tri> triangles;
+    //sstd::vector<tri> triangles;
     uint* tri_indices = nullptr;
     bvnode* nodes = nullptr;
     fdata m_data;
