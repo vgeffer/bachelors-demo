@@ -2,7 +2,9 @@
 
 #include "lib/glpix.hpp"
 #include <glm/glm.hpp>
+#include <vector>
 #include "camera.hpp"
+#include "lib/tiny_bvh/tiny_bvh.h"
 
 #define EPSILON 0.0001f
 
@@ -12,61 +14,49 @@ struct alignas(sizeof(glm::vec4)) fdata { glm::vec4 p0, p1, p2, pos; glm::mat4x4
 
 /* for demo - AABB node */
 class raytracer : public glpix {
-  public:
-    raytracer();
+    public:
+      raytracer();
 
-  private:
-    bool create() override;   
-    bool update(float delta) override;
+    private:
+        bool create() override;   
+        bool update(float delta) override;
 
-  private:
-    inline float randf() { return (static_cast<float>(rand() % 65536) / 65536.0f); }
+    private:
+        inline float randf() { return (static_cast<float>(rand() % 65536) / 65536.0f); }
+        void load_obj(const char* filename);
+    
+    private:
+        camera m_c;
+        glpix::kernel<cl_mem, float, int, int> m_test_kernel;
 
+        std::vector<tinybvh::bvhvec4> vertices;
+        std::vector<uint32_t>         indices;
 
-    /*float intersect_triangle(const ray& r, const tri& t);
-    bool intersect_AABB(const ray& r, const glm::vec3& min, const glm::vec3& max);
-
-    void build_bvh();
-    void update_bounds(bvnode& node);
-    void subdivide(bvnode& node);
-    void load_obj(const char* path);
-
-    void draw_bvh(ray& r, const bvnode& root);*/
-
-  private:
-    camera m_c;
-
-    //sstd::vector<tri> triangles;
-    uint* tri_indices = nullptr;
-    bvnode* nodes = nullptr;
-    fdata m_data;
-
-    //bvh<aabb, tri> m_bvh;
-
-    uint root = 0, used = 1;
+        fdata m_data;
+        uint root = 0, used = 1;
 };
 
 template <typename ...T>
 glm::vec3 vmin(T... args) {
   
-  glm::vec3 min = glm::vec3(INFINITY);
-  for (auto arg : {args...}) {
-    if (arg.x < min.x) min.x = arg.x;
-    if (arg.y < min.y) min.y = arg.y;
-    if (arg.z < min.z) min.z = arg.z;
-  }
-  return min;
+    glm::vec3 min = glm::vec3(INFINITY);
+    for (auto arg : {args...}) {
+        if (arg.x < min.x) min.x = arg.x;
+        if (arg.y < min.y) min.y = arg.y;
+        if (arg.z < min.z) min.z = arg.z;
+    }
+    return min;
 }
 
 template <typename ...T>
 glm::vec3 vmax(T... args) {
 
-  glm::vec3 max = glm::vec3(-INFINITY);
-  for (auto arg : {args...}) {
-    if (arg.x > max.x) max.x = arg.x;
-    if (arg.y > max.y) max.y = arg.y;
-    if (arg.z > max.z) max.z = arg.z;
-  }
-  return max;
+    glm::vec3 max = glm::vec3(-INFINITY);
+    for (auto arg : {args...}) {
+        if (arg.x > max.x) max.x = arg.x;
+        if (arg.y > max.y) max.y = arg.y;
+        if (arg.z > max.z) max.z = arg.z;
+    }
+    return max;
 }
 
