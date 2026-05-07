@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.30.0)
 project(raytracer C CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -11,7 +11,9 @@ list(APPEND CMAKE_MODULE_PATH "${OPENVDB_CMAKE_PATH}")
 
 find_package(glm CONFIG REQUIRED)
 find_package(glfw3 3.4 REQUIRED)
+find_package(OpenCL 1.2 REQUIRED)
 find_package(OpenVDB REQUIRED openvdb)
+find_package(OpenGL REQUIRED)
 
 #include(${OPENVDB_CMAKE}/FindBlosc.cmake)
 #include(${OPENVDB_CMAKE}/FindOpenVDB.cmake)
@@ -26,8 +28,11 @@ add_executable(raytracer
     "lib/glad/khrplatform.h"
     "lib/glpix.hpp"
     "lib/glpix.cpp"
+    "lib/tiny_bvh/tiny_bvh.h"
+    "lib/tiny_bvh/tiny_bvh.cpp"
+   
 )
 
-target_link_libraries(raytracer PRIVATE glm::glm glfw OpenVDB::openvdb)
+target_link_libraries(raytracer PRIVATE glm::glm glfw OpenVDB::openvdb OpenCL::OpenCL OpenGL::GL)
 
 

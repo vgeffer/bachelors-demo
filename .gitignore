@@ -40,8 +40,14 @@
 # debug information files
 *.dwo
 
+# Build Directory
 .cache
 build
+
+# Non-Code Resource Files
 *.vdb
-*.2
 *.mtl
+*.2
+
+# Weird MacOS Junk
+.DS_Store
