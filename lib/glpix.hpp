@@ -4,28 +4,60 @@
 ///
 
 #pragma once
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
-#include <GLFW/glfw3.h>
 #include <utility>
-
+#include <GLFW/glfw3.h>
 
 /* Platform Resolution Macros */
 #if defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
+
+    #define GLFW_EXPOSE_NATIVE_WIN32
+    #define GLFW_EXPOSE_NATIVE_WGL  
+    #include <GLFW/glfw3native.h>
+
+    #define CL_TARGET_OPENCL_VERSION 200  
+    #include <CL/cl.h>
+    #include <CL/cl_gl.h> 
+    #include <Windows.h>
+
+    #define CL_GL_INEROP_EXT "cl_khr_gl_sharing"
     #define PLATFORM_WINDOWS
+
 #elif defined(__unix__) || defined(__linux__) || defined(__FreeBSD__)
+
+    /* GLFW Includes */
+    #define GLFW_EXPOSE_NATIVE_X11
+    #define GLFW_EXPOSE_NATIVE_GLX
+    #include <GLFW/glfw3native.h>
+
+    /* OpenCL Includes*/
+    #define CL_TARGET_OPENCL_VERSION 200    
+    #include <CL/cl.h>
+    #include <CL/cl_gl.h> 
+
+    /* Platform Definitions */
+    #define CL_GL_INTEROP_EXT "cl_khr_gl_sharing"
     #define PLATFORM_UNIX
+
 #elif defined(__APPLE__) || defined(__MACH__)
+
     #include <OpenCL/cl.h>
     #include <OpenCL/cl_gl.h>
     #include <OpenCL/gcl.h>
     #include <OpenGL/CGLCurrent.h>
+
+    #define CL_GL_INTEROP_EXT "cl_APPLE_gl_sharing"
     #define PLATFORM_MACOS
+
 #else
     #error Unknown or Unsupported Platform
 #endif
+
 
 class glpix {
 
@@ -324,6 +356,8 @@ class glpix {
         void init_glfw(int w, int h, const std::string& title, bool fullscreen);
         void init_opengl();
         void init_opencl();
+
+        bool dev_has_extension(const cl_device_id& dev, const char* extension);
 
     private:
         /* Interactions */

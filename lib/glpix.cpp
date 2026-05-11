@@ -1,6 +1,9 @@
 #include "glad/glad.h"
 #include "glpix.hpp"
 
+#include <CL/cl.h>
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -9,10 +12,15 @@
 #include <iostream>
 #include <memory>
 #include <ostream>
+#include <regex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 #include <fstream>
+
+#include <cstring>
 
 #define WORK_GROUP_RATIO 16
 #define DIV_ROUND_UP(a, b) ((((a) % (b)) > 0) ? ((a) / (b) + 1) : ((a) / (b)))
@@ -25,12 +33,12 @@
 
 #define EXEC_AND_CHECK_RET(func, ...)   \
         if ((err = func(__VA_ARGS__)) != CL_SUCCESS) \
-            throw std::runtime_error(std::string(#func) + "() failed with error code: " + std::to_string(err));
+            throw std::runtime_error("On line "  + std::to_string(__LINE__) + " - " + std::string(#func) + "() failed with error code: " + std::to_string(err));
 
 #define EXEC_AND_CHECK_ARG(func, ret, ...) \
         ret = func(__VA_ARGS__, &err); \
         if (!ret || err != CL_SUCCESS) \
-            throw std::runtime_error(std::string(#func) + "() failed with error code: " + std::to_string(err));
+            throw std::runtime_error("On line "  + std::to_string(__LINE__) + " - " + std::string(#func) + "() failed with error code: " + std::to_string(err));
 
         
 const char* VERTEX_SOURCE = R"(
@@ -381,19 +389,65 @@ void glpix::init_opengl() {
 
 void glpix::init_opencl() {
 
+    cl_platform_id id;
+    cl_int err;
+
+    cl_uint platform_count = 0;
+    EXEC_AND_CHECK_RET(clGetPlatformIDs, 0, nullptr, &platform_count);
+    if (platform_count <= 0) throw std::runtime_error("No viable OpenCL platforms found");
+
+    /* Alloc memory */
+    cl_platform_id selected_platform;
+    std::vector<cl_platform_id> platforms = std::vector<cl_platform_id>(platform_count);
+    EXEC_AND_CHECK_RET(clGetPlatformIDs, platforms.capacity(), platforms.data(), nullptr);
+
+    std::vector<std::pair<cl_platform_id, cl_device_id>> viable_devices;
+    for (auto platform : platforms) {
+        
+        cl_uint platform_dev_count = 0;
+        err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &platform_dev_count);
+
+        if (err == CL_DEVICE_NOT_FOUND || platform_dev_count == 0)
+            continue;
+
+        else if (err != CL_SUCCESS)
+            throw std::runtime_error("ASD");
+
+        std::vector<cl_device_id> platform_devices = std::vector<cl_device_id>(platform_dev_count);
+        EXEC_AND_CHECK_RET(clGetDeviceIDs, platform, CL_DEVICE_TYPE_ALL, platform_dev_count, platform_devices.data(), nullptr);
+
+
+        for (const auto& device : platform_devices) {
+            if (dev_has_extension(device, CL_GL_INTEROP_EXT))
+                viable_devices.emplace_back(std::make_pair(platform, device));
+        }
+    }
+
+    if (viable_devices.empty())
+        throw std::runtime_error("No Viable OpenCL devices found!");
+
+    /* TODO: Selection mechanism */
+    selected_platform = viable_devices[0].first;
+    m_cl_device       = viable_devices[0].second;
+
+    /* Get device name */
+    char dev_name[256];
+    clGetDeviceInfo(m_cl_device, CL_DEVICE_NAME, sizeof(dev_name), dev_name, nullptr);
+    std::cerr << "Using device: " << dev_name << " - ";
+
     /* Init OpenCL Interop */
     #if defined(PLATFORM_WINDOWS)
         cl_context_properties cl_ctx_props[] = {
-            CL_GL_CONTEXT_KHR, (cl_context_properties) wglGetCurrentContext(),
-            CL_WGL_HDC_KHR, (cl_context_properties) wglGetCurrentDC(),
-            CL_CONTEXT_PLATFORM, (cl_context_properties) platform,
+            CL_GL_CONTEXT_KHR, (cl_context_properties)glfwGetWGLContext(window),
+            CL_WGL_HDC_KHR, (cl_context_properties)GetDC(glfwGetWin32Window(window)),
+            CL_CONTEXT_PLATFORM, (cl_context_properties) selected_platform,
             0
         };
     #elif defined(PLATFORM_UNIX)
         cl_context_properties cl_ctx_props[] = {
-            CL_GL_CONTEXT_KHR, (cl_context_properties) glXGetCurrentContext(),
-            CL_GLX_DISPLAY_KHR, (cl_context_properties) glXGetCurrentDisplay(),
-            CL_CONTEXT_PLATFORM, (cl_context_properties) platform,
+            CL_GL_CONTEXT_KHR, (cl_context_properties) glfwGetGLXContext(m_wnd),
+            CL_GLX_DISPLAY_KHR, (cl_context_properties) glfwGetX11Display(),
+            CL_CONTEXT_PLATFORM, (cl_context_properties) selected_platform,
             0
         };
     #elif defined(PLATFORM_MACOS)
@@ -407,53 +461,30 @@ void glpix::init_opencl() {
         };
     #endif
 
-    cl_platform_id id;
-    cl_int err;
-
-    cl_uint platform_count = 0;
-    EXEC_AND_CHECK_RET(clGetPlatformIDs, 0, nullptr, &platform_count);
-    if (platform_count <= 0) throw std::runtime_error("No viable OpenCL platforms found");
-
-    /* Alloc memory */
-    std::vector<cl_platform_id> platforms = std::vector<cl_platform_id>(platform_count);
-    EXEC_AND_CHECK_RET(clGetPlatformIDs, platforms.capacity(), platforms.data(), nullptr);
-
-    /* Get available CL GPU */
-    for (auto platform : platforms) {
-        err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &m_cl_device, NULL);
-
-        if (err == CL_SUCCESS)
-            break;
-    }
-
-    /* Retry for Any other device */
-    if (err != CL_SUCCESS) {
-        std::cout << "No valid GPU found, retrying for any OpenCL device" << std::endl;
-        for (auto platform : platforms) {
-            err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 1, &m_cl_device, NULL);
-
-            if (err == CL_SUCCESS)
-                break;
-        }
-
-        if (err != CL_SUCCESS)
-            throw std::runtime_error("No OpenCL devices found");
-    }
-
-    /* Get device name */
-    char dev_name[256];
-    clGetDeviceInfo(m_cl_device, CL_DEVICE_NAME, sizeof(dev_name), &dev_name, nullptr);
-    std::cerr << "Using device: " << dev_name << " - ";
-
     EXEC_AND_CHECK_ARG(clCreateContext, m_cl_context, cl_ctx_props, 1, &m_cl_device, NULL, NULL);
 
     #if defined(PLATFORM_MACOS)
         cl_queue_properties_APPLE props[] = { 0 };
         EXEC_AND_CHECK_ARG(clCreateCommandQueueWithPropertiesAPPLE, m_cl_queue, m_cl_context, m_cl_device, props);
     #else
-        EXEC_AND_CHECK_ARG(clCreateCommandQueueWithProperties, m_cl_queue, m_cl_ctx, dev_id, nullptr);
+        EXEC_AND_CHECK_ARG(clCreateCommandQueueWithProperties, m_cl_queue, m_cl_context, m_cl_device, nullptr);
     #endif
 
     /* Init OGL <-> OCL interop */
     EXEC_AND_CHECK_ARG(clCreateFromGLTexture, m_texture_mem, m_cl_context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0, m_texture);
+}
+
+
+bool glpix::dev_has_extension(const cl_device_id& dev, const char* extension) {
+
+    cl_int err;
+
+    size_t args_size;
+    EXEC_AND_CHECK_RET(clGetDeviceInfo, dev, CL_DEVICE_EXTENSIONS, 0, nullptr, &args_size);
+
+    std::vector<char> ext_buffer = std::vector<char>(args_size + 1);
+    EXEC_AND_CHECK_RET(clGetDeviceInfo, dev, CL_DEVICE_EXTENSIONS, ext_buffer.size(), (void*)ext_buffer.data(), nullptr);
+
+    std::regex ext_regex(extension);
+    return std::regex_search(ext_buffer.data(), ext_regex);
 }

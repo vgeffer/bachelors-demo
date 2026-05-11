@@ -11,19 +11,23 @@
 
 #include "lib/tiny_bvh/tiny_bvh.h"
 
-#include <OpenVDB/openvdb.h>
+#if defined(PLATFORM_UNIX)
+    #include <openvdb/openvdb.h>
+#elif defined(PLATFORM_MACOS)
+    #include <OpenVDB/openvdb.h>
+#endif
 
 using namespace glm; 
 using namespace std;
 
-raytracer::raytracer() : glpix("RT-DEMO", 1280, 720, false) {}
+raytracer::raytracer() : glpix("RT-DEMO", 2560, 1440, false) {}
 
 bool raytracer::create() {
   
     m_test_kernel = create_kernel<cl_mem, float, int, int>("kernels/test.cl", "test", gpu_screen_buffer(), 1.0f, win_width(), win_height());
 
     openvdb::initialize();
-    load_obj("test.obj");;
+    //load_obj("test.obj");;
 
     //tinybvh::BVH_GPU bvh;
     //bvh.Build((const tinybvh::bvhvec4*) vertices.data(), (const uint32_t*) indices.data(), indices.size() / 3);
@@ -31,7 +35,7 @@ bool raytracer::create() {
     m_c = camera(vec4(0, 0, -20, 1), glm::radians(90.0f), 5);
     //std::cout << "Model has " << triangles.size() << " triangles and " << used << " BVH nodes" << std::endl;
 
-    openvdb::io::File file = openvdb::io::File("cloud.vdb");
+    /*openvdb::io::File file = openvdb::io::File("cloud.vdb");
     file.open();
 
     openvdb::GridBase::Ptr base_ptr;
@@ -52,8 +56,9 @@ bool raytracer::create() {
 
     openvdb::FloatTree grid = openvdb::gridPtrCast<openvdb::FloatGrid>(base_ptr)->tree();
 
-    draw_kernel(m_test_kernel);
-    std::cout << grid.activeLeafVoxelCount() << std::endl;
+
+    std::cout << grid.activeLeafVoxelCount() << std::endl;*/
+        draw_kernel(m_test_kernel);
     return true;
 }
 
