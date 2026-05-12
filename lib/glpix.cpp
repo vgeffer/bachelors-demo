@@ -1,26 +1,13 @@
 #include "glad/glad.h"
 #include "glpix.hpp"
 
-#include <CL/cl.h>
-#include <GLFW/glfw3.h>
-#include <GLFW/glfw3native.h>
 #include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
-#include <glm/glm.hpp>
+#include <fstream>
 #include <iostream>
-#include <memory>
-#include <ostream>
 #include <regex>
-#include <sstream>
-#include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
-#include <fstream>
-
-#include <cstring>
+#include <glm/glm.hpp>
 
 #define WORK_GROUP_RATIO 16
 #define DIV_ROUND_UP(a, b) ((((a) % (b)) > 0) ? ((a) / (b) + 1) : ((a) / (b)))
@@ -75,7 +62,6 @@ struct glpix::type_helper<glpix::buffer_base> { using type = cl_mem; };
 
 template<typename... T> 
 struct glpix::type_helper<glpix::buffer<T...>> {using type = cl_mem; };
-
 
 glpix::kernel_base::kernel_base(const cl_context& context, const cl_device_id& device, const char* kernel_path, const char* kernel_entry)
     : m_instance_count(new uint(1)) {
@@ -473,7 +459,6 @@ void glpix::init_opencl() {
     /* Init OGL <-> OCL interop */
     EXEC_AND_CHECK_ARG(clCreateFromGLTexture, m_texture_mem, m_cl_context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0, m_texture);
 }
-
 
 bool glpix::dev_has_extension(const cl_device_id& dev, const char* extension) {
 

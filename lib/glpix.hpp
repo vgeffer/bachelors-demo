@@ -1,16 +1,9 @@
-///
-/// @file game_window.hpp
-/// @author geffevil
-///
-
 #pragma once
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <GLFW/glfw3.h>
 
 /* Platform Resolution Macros */
