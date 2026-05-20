@@ -1,5 +1,5 @@
 #include "kernels/include/math.cl"
-#include "kernels/include/rt_primitives.cl"
+#include "splat/include/rtutils.h"
 
 typedef struct __attribute__ ((packed)) _camera {
 	float4 p0, p1, p2, pos;
@@ -48,7 +48,7 @@ float4 pixel(float2 uv, __global const camera* cam, float time) {
 	  	float3 point = r.origin.xyz + depth * r.dir.xyz;
 	  	float dist = sceneSDF(point, time);
 	  	
-        if (dist < 0.001) 
+        if (dist < 0.0001) 
 		  	return (float4)(0, 1 - (step / 4096), 0, 1);
 	  	depth += dist;
 	  	

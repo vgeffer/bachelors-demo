@@ -1,0 +1,5 @@
+Found Grid [0]: density
+Built 7856497 leafs from 15712994 voxels
+Kernel changed, recomputing work groups: 
+Local work groups size: x=16, y=16
+Global work groups size: x=1280, y=720

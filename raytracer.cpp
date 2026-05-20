@@ -1,41 +1,43 @@
+#include "camera.hpp"
 #include "lib/glpix.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <ostream>
 #include <sstream>
+#include <string>
 #include "raytracer.hpp"
 
 #include "lib/tiny_bvh/tiny_bvh.h"
+#include "splat/include/rtutils.h"
+#include "splat/splat_model.hpp"
 
 #if defined(PLATFORM_UNIX)
     #include <openvdb/openvdb.h>
 #elif defined(PLATFORM_MACOS)
     #include <OpenVDB/openvdb.h>
+    #include <OpenVDB/tools/NodeVisitor.h>
 #endif
 
 using namespace glm; 
 using namespace std;
 
-raytracer::raytracer() : glpix("RT-DEMO", 2560, 1440, false) {}
+raytracer::raytracer() : glpix("RT-DEMO", 1280, 720, false) {}
 
 bool raytracer::create() {
-  
-    m_test_kernel = create_kernel<cl_mem, float, int, int>("kernels/test.cl", "test", gpu_screen_buffer(), 1.0f, win_width(), win_height());
 
+    /* Init OpenVDB */
     openvdb::initialize();
-    //load_obj("test.obj");;
 
-    //tinybvh::BVH_GPU bvh;
-    //bvh.Build((const tinybvh::bvhvec4*) vertices.data(), (const uint32_t*) indices.data(), indices.size() / 3);
+    /* Init Camera */
+    m_c = camera(vec4(0, 0, -20, 1), glm::radians(90.0f), 5, static_cast<float>(win_width()) / static_cast<float>(win_height()));
 
-    m_c = camera(vec4(0, 0, -20, 1), glm::radians(90.0f), 5);
-    //std::cout << "Model has " << triangles.size() << " triangles and " << used << " BVH nodes" << std::endl;
-
-    /*openvdb::io::File file = openvdb::io::File("cloud.vdb");
+    /* Load OpenVDB File */
+    openvdb::io::File file = openvdb::io::File("cloud-lores.vdb");
     file.open();
 
     openvdb::GridBase::Ptr base_ptr;
@@ -53,12 +55,22 @@ bool raytracer::create() {
         
     }
     file.close();
+    m_model = splat_model(openvdb::gridPtrCast<openvdb::FloatGrid>(base_ptr)->tree());
 
-    openvdb::FloatTree grid = openvdb::gridPtrCast<openvdb::FloatGrid>(base_ptr)->tree();
+    
+    /* Setup kernel */
+    camera::gpu_struct cam = m_c.togpu();
+    m_camera_buffer = create_buffer<camera::gpu_struct>(4, buffer<float>::usage::RW, &cam);
+
+    const auto tree = m_model.tree();
+    m_bvh = create_buffer<sphere>(tree.size(), buffer<sphere>::usage::RD_ONLY, tree.data());
+
+    m_test_kernel = create_kernel<cl_mem, cl_mem, cl_mem, int, float, int, int>(
+        "splat/kernels/raytracer.cl", 
+        "raymarch", gpu_screen_buffer(), m_camera_buffer, m_bvh, tree.size(), 1.0f, win_width(), win_height());
 
 
-    std::cout << grid.activeLeafVoxelCount() << std::endl;*/
-        draw_kernel(m_test_kernel);
+    set_draw_kernel(m_test_kernel);
     return true;
 }
 
@@ -99,47 +111,14 @@ bool raytracer::update(float delta) {
         m_c.rot(c_rot);
     }
 
-    m_test_kernel.set_arg<1>(time() * 0.2f);
+    camera::gpu_struct cam = m_c.togpu();
+    write_buffer(m_camera_buffer, 4, &cam).await();
+    auto [p0, p1, p2] = m_c.view_vectors();
+    
+    m_test_kernel.set_arg<4>(time() * 64);
 
     return true;
 }
-
-void raytracer::load_obj(const char* path) {
-
-    vertices.clear();
-    indices.clear();
-    
-    ifstream obj_in = ifstream(path, std::ios::in);
-    if (!obj_in)
-        throw runtime_error("Cannot open " + string(path));
-        
-    std::string line;
-    vector<glm::vec3> vertices;
-
-    while (std::getline(obj_in, line))
-    {
-        if (line.substr(0,2)=="v ") {
-      
-            istringstream v(line.substr(2));
-            float x,y,z;
-            v >> x; v >> y; v >> z;
-
-            vertices.emplace_back(x, y, z);
-        }
-    
-        else if(line.substr(0,2)=="f "){
-            
-            istringstream v(line.substr(2));
-            uint32_t a, b, c;
-            v >> a; v >> b; v >> c;
-            
-            indices.emplace_back(a);
-            indices.emplace_back(b);
-            indices.emplace_back(c);
-        }
-    }
-}
-
 
 int main() {
     raytracer rt;

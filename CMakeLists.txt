@@ -30,7 +30,7 @@ add_executable(raytracer
     "lib/glpix.cpp"
     "lib/tiny_bvh/tiny_bvh.h"
     "lib/tiny_bvh/tiny_bvh.cpp"
-   
+    #"test.cpp"
 )
 
 target_link_libraries(raytracer PRIVATE glm::glm glfw OpenVDB::openvdb OpenCL::OpenCL OpenGL::GL)

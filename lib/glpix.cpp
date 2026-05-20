@@ -57,11 +57,17 @@ const char* FRAGMENT_SOURCE = R"(
 )";
 
 /* Template specializations */
-template <>
-struct glpix::type_helper<glpix::buffer_base> { using type = cl_mem; };
+template<typename T>
+struct glpix::type_helper<glpix::buffer<T>> {
+    using type = cl_mem; 
+    inline static constexpr type cast(const glpix::buffer<T>& val) { return static_cast<type>(val); }
+};
 
-template<typename... T> 
-struct glpix::type_helper<glpix::buffer<T...>> {using type = cl_mem; };
+template<>
+struct glpix::type_helper<glpix::buffer_base> {
+    using type = cl_mem; 
+    inline static constexpr type cast(const glpix::buffer_base& val) { return static_cast<type>(val); }
+};
 
 glpix::kernel_base::kernel_base(const cl_context& context, const cl_device_id& device, const char* kernel_path, const char* kernel_entry)
     : m_instance_count(new uint(1)) {
@@ -102,14 +108,21 @@ glpix::kernel_base::kernel_base(const cl_context& context, const cl_device_id& d
     EXEC_AND_CHECK_RET(clGetKernelWorkGroupInfo, m_kernel, device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &m_max_work_size, NULL);
 }
 
+glpix::buffer_base::buffer_base(const cl_context& context, size_t size, usage mem_usage, void* initial_data)
+    : m_instance_count(new uint(1)), m_buffer_size(size) {
+
+    cl_int err;
+    cl_mem_flags flags = static_cast<cl_mem_flags>(mem_usage) | (initial_data ? CL_MEM_COPY_HOST_PTR : 0);
+    EXEC_AND_CHECK_ARG(clCreateBuffer, m_memory_buffer, context, flags, size, initial_data);
+}
+
 glpix::glpix(const std::string& name, int w, int h, bool fullscreen) 
     :m_w(w), m_h(h) { 
 
     INIT_STEP("Window", init_glfw, w, h, name, fullscreen)
     INIT_STEP("OpenGL Context", init_opengl)
     INIT_STEP("OpenCL Context", init_opencl)
-    
-    //glPolygonMode(GL_FRONT_AND_BACK,GL_LINE);
+
 }
 
 glpix::~glpix() {
@@ -237,19 +250,18 @@ void glpix::draw(int w, int h, const glpix::color& c) {
     m_buffer[h * m_w + w] = c;
 }
 
-glpix::compute_event glpix::dispatch_kernel(const kernel_base& kernel, uint work_dim, const size_t* off, const size_t* local, const size_t* global) {
-
-    cl_int err;
-    cl_event dispatch_event;
-    EXEC_AND_CHECK_RET(clEnqueueNDRangeKernel, m_cl_queue, kernel, work_dim, off, global, local, 0, nullptr, &dispatch_event);
-    return compute_event(dispatch_event);
-}
-
 glpix::compute_event glpix::dispatch_kernel(const kernel_base& kernel, uint work_dim, const size_t* off, const size_t* local, const size_t* global, const compute_event& wait_for) {
 
     cl_int err;
-    cl_event dispatch_event, wait_for_event = static_cast<cl_event>(wait_for);
-    EXEC_AND_CHECK_RET(clEnqueueNDRangeKernel, m_cl_queue, kernel, work_dim, off, global, local, 1, &wait_for_event, &dispatch_event);
+    cl_event dispatch_event;
+
+    if (wait_for.is_valid()) {
+        cl_event wait_for_event = static_cast<cl_event>(wait_for);
+        EXEC_AND_CHECK_RET(clEnqueueNDRangeKernel, m_cl_queue, kernel, work_dim, off, global, local, 1, &wait_for_event, &dispatch_event);
+        return compute_event(dispatch_event);
+    }
+
+    EXEC_AND_CHECK_RET(clEnqueueNDRangeKernel, m_cl_queue, kernel, work_dim, off, global, local, 0, nullptr, &dispatch_event);
     return compute_event(dispatch_event);
 }
 
@@ -472,4 +484,38 @@ bool glpix::dev_has_extension(const cl_device_id& dev, const char* extension) {
 
     std::regex ext_regex(extension);
     return std::regex_search(ext_buffer.data(), ext_regex);
+}
+
+glpix::compute_event glpix::write_buffer_internal(const glpix::buffer_base& buffer,
+                                                  size_t buffer_size, 
+                                                  void* data, size_t buffer_off, 
+                                                  const glpix::compute_event& wait_for) {
+    cl_int err;
+    cl_event dispatch_event;
+
+    if (wait_for.is_valid()) {
+        cl_event wait_for_event = static_cast<cl_event>(wait_for);
+        EXEC_AND_CHECK_RET(clEnqueueWriteBuffer, m_cl_queue, static_cast<cl_mem>(buffer), CL_FALSE, buffer_off, buffer_size, data, 1, &wait_for_event, &dispatch_event);
+        return compute_event(dispatch_event);
+    }
+
+    EXEC_AND_CHECK_RET(clEnqueueWriteBuffer, m_cl_queue, static_cast<cl_mem>(buffer), CL_FALSE, buffer_off, buffer_size, data, 0, nullptr, &dispatch_event);
+    return compute_event(dispatch_event);
+}
+
+glpix::compute_event glpix::read_buffer_internal(const glpix::buffer_base& buffer,
+                                           size_t buffer_size, 
+                                           void* data, size_t buffer_off, 
+                                           const glpix::compute_event& wait_for) {
+    cl_int err;
+    cl_event dispatch_event;
+
+    if (wait_for.is_valid()) {
+        cl_event wait_for_event = static_cast<cl_event>(wait_for);
+        EXEC_AND_CHECK_RET(clEnqueueReadBuffer, m_cl_queue, static_cast<cl_mem>(buffer), CL_FALSE, buffer_off, buffer_size, data, 1, &wait_for_event, &dispatch_event);
+        return compute_event(dispatch_event);
+    }
+
+    EXEC_AND_CHECK_RET(clEnqueueReadBuffer, m_cl_queue, static_cast<cl_mem>(buffer), CL_FALSE, buffer_off, buffer_size, data, 0, nullptr, &dispatch_event);
+    return compute_event(dispatch_event);                        
 }

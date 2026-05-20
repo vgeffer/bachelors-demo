@@ -2,9 +2,11 @@
 
 #include <array>
 #include <cstdint>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <GLFW/glfw3.h>
+#include <vector>
 
 /* Platform Resolution Macros */
 #if defined(_WIN32) || defined(WIN32) || defined(__CYGWIN__) || defined(__MINGW32__) || defined(__BORLANDC__)
@@ -51,20 +53,22 @@
     #error Unknown or Unsupported Platform
 #endif
 
-
 class glpix {
 
     private:
-        template <typename T>
-        struct type_helper { using type = T; }; 
-
         class buffer_base {
+
+            public:
+                enum class usage : cl_mem_flags {
+                    WR_ONLY = CL_MEM_WRITE_ONLY, RD_ONLY = CL_MEM_READ_ONLY, RW = CL_MEM_READ_WRITE  
+                };
+
             public:
                 buffer_base() = default;
                 buffer_base(buffer_base&& other)
-                    : m_memory_buffer(other.m_memory_buffer), m_instance_count(other.m_instance_count) { other.m_instance_count = nullptr; }
+                    : m_memory_buffer(other.m_memory_buffer), m_instance_count(other.m_instance_count), m_buffer_size(other.m_buffer_size) { other.m_instance_count = nullptr; }
                 buffer_base(const buffer_base& other)
-                    : m_memory_buffer(other.m_memory_buffer), m_instance_count(other.m_instance_count) { if (m_instance_count) (*m_instance_count)++; }
+                    : m_memory_buffer(other.m_memory_buffer), m_instance_count(other.m_instance_count), m_buffer_size(other.m_buffer_size) { if (m_instance_count) (*m_instance_count)++; }
 
                 virtual ~buffer_base() {
                     /* Object moved */
@@ -74,11 +78,12 @@ class glpix {
                     (*m_instance_count)--;
                     if (*m_instance_count == 0) {
 
-                        //(m_program);
+                        clReleaseMemObject(m_memory_buffer);
                         delete m_instance_count;
                     }
                 }
-
+                const bool is_valid() const noexcept { return m_memory_buffer && m_instance_count; }
+                const size_t size() const noexcept { return m_buffer_size; }
                 constexpr operator cl_mem() const noexcept { return m_memory_buffer; }                
                 constexpr buffer_base& operator=(const buffer_base& other) noexcept {
 
@@ -91,8 +96,11 @@ class glpix {
                 }
 
             protected:
+                explicit buffer_base(const cl_context& context, size_t size, usage mem_usage, void* initial_data);
+
                 uint* m_instance_count = nullptr;
                 cl_mem m_memory_buffer = nullptr;
+                size_t m_buffer_size = 0;
         };
 
         class kernel_base {
@@ -150,6 +158,12 @@ class glpix {
         };
 
     public:
+        template <typename T>
+        struct type_helper { 
+            using type = T; 
+            static inline constexpr type cast(const T& val) { return static_cast<type>(val); }
+        }; 
+
         enum class key : uint16_t {
             A = GLFW_KEY_A, B = GLFW_KEY_B, C = GLFW_KEY_C,
             D = GLFW_KEY_D, E = GLFW_KEY_E, F = GLFW_KEY_F,
@@ -205,14 +219,34 @@ class glpix {
         };
 
         template<typename T> class buffer : public buffer_base {
-            
+            public:
+                buffer() : buffer_base() {}
+                buffer(const buffer& other) : buffer_base(other) {}
+                buffer(buffer&& other) : buffer_base(other) {}
 
+                constexpr operator cl_mem() const noexcept { return m_memory_buffer; }                
+                constexpr buffer<T>& operator=(const buffer<T>& other) noexcept {
+
+                    m_memory_buffer = other.m_memory_buffer;
+                    m_instance_count = other.m_instance_count;
+                    m_buffer_size = other.m_buffer_size;
+
+                    if (m_instance_count)
+                        (*m_instance_count)++;
+                    return *this;
+                }
+
+            private:
+                buffer(const cl_context& context, size_t count, usage mem_usage, const T* initial_data)
+                    : buffer_base(context, sizeof(T) * count, mem_usage, (void*)initial_data) {}
+            
+            friend class glpix;
 
         };
 
         template <typename ...T> class kernel : public kernel_base {
             public:
-                template <uint N> using nth_arg_type = typename glpix::type_helper<typename std::tuple_element<N, std::tuple<T...>>::type>::type;
+                template <uint N> using nth_arg_type = typename std::tuple_element<N, std::tuple<T...>>::type;
 
             public:
                 kernel() : kernel_base() {}
@@ -230,7 +264,8 @@ class glpix {
                     return *this;
                 }
 
-                template <uint N> void set_arg(const nth_arg_type<N>& arg) { kernel_base::set_arg<nth_arg_type<N>>(N, static_cast<nth_arg_type<N>>(arg)); }
+                template <uint N> void set_arg(const nth_arg_type<N>& arg) { 
+                    kernel_base::set_arg<typename type_helper<nth_arg_type<N>>::type>(N, type_helper<nth_arg_type<N>>::cast(arg)); }
 
             private:
                 kernel(const cl_context& context, const cl_device_id& device, const char* kernel_path, const char* kernel_entry)
@@ -239,8 +274,10 @@ class glpix {
                 kernel(const cl_context& context, const cl_device_id& device, const char* kernel_path, const char* kernel_entry, const T&... args)
                     : kernel_base(context, device, kernel_path, kernel_entry) { rec_set_args(0, args...); }
 
-                template<typename A> inline void rec_set_args(uint idx, const A& arg) { kernel_base::set_arg(idx, arg); }
-                template<typename A, typename... B> inline void rec_set_args(uint idx, const A& arg, const B&... rest) { kernel_base::set_arg(idx, arg); rec_set_args(idx + 1, rest...); }
+                template<typename A> inline void rec_set_args(uint idx, const A& arg) { kernel_base::set_arg<typename type_helper<A>::type>(idx, type_helper<A>::cast(arg));  }
+                template<typename A, typename... B> inline void rec_set_args(uint idx, const A& arg, const B&... rest) { 
+                    //std::cout << idx << " " << typeid(typename type_helper<A>::type).name() << std::endl;
+                    kernel_base::set_arg<typename type_helper<A>::type>(idx, type_helper<A>::cast(arg));  rec_set_args(idx + 1, rest...); }
             
             friend class glpix;
         };
@@ -248,7 +285,7 @@ class glpix {
         class compute_event {
             public:
 
-                compute_event() = default;
+                compute_event() {}
                 compute_event(compute_event&& other)
                     : m_envent(other.m_envent), m_instance_count(other.m_instance_count) { other.m_instance_count = nullptr; }
                 compute_event(const compute_event& other)
@@ -278,11 +315,11 @@ class glpix {
                     return *this;
                 }
 
-                void await() { clWaitForEvents(1, &m_envent); }
-                const bool is_valid() { return m_envent; }
+                void await() const { clWaitForEvents(1, &m_envent); }
+                const bool is_valid() const noexcept { return m_envent; }
 
             private:
-                compute_event(const cl_event& event) : m_envent(event) { m_instance_count = new uint(1);}    
+                compute_event(const cl_event& event) : m_instance_count(new uint(1)), m_envent(event) { }    
 
                 uint* m_instance_count = nullptr;
                 cl_event m_envent      = nullptr;
@@ -327,23 +364,62 @@ class glpix {
         inline float time() const noexcept { return m_global_time; }
         inline const cl_mem& gpu_screen_buffer() const noexcept { return m_texture_mem; }
 
+        inline void set_draw_kernel(const kernel_base& kern) { m_kernel_changed = true; m_active_kernel = kern; }
+
+        compute_event dispatch_kernel(const kernel_base& kernel, 
+                                      uint work_dim, 
+                                      const size_t* off, 
+                                      const size_t* local, 
+                                      const size_t* global, 
+                                      const compute_event& wait_for = compute_event());        
+
+        /* Templated functions */
         template <typename T>
-        buffer<T> create_buffer() {}
+        buffer<T> create_buffer(size_t count, typename buffer<T>::usage usage_flag, const T* initial_data = nullptr) {
+            return glpix::buffer<T>(m_cl_context, count, usage_flag, initial_data);
+        }
+
+        template <typename T>
+        buffer<T> create_buffer(typename buffer<T>::usage usage_flag, const std::vector<T>& initial_data) {
+            return glpix::buffer<T>(m_cl_context, initial_data.size(), usage_flag, initial_data.data());
+        }
 
         template <typename ...T>
         kernel<T...> create_kernel(const char* source_path, const char* kernel_entry = "kernel") { 
             return glpix::kernel<T...>(m_cl_context, m_cl_device, source_path, kernel_entry);
         }
 
-        template <typename ...T>
-        kernel<T...> create_kernel(const char* source_path, const char* kernel_entry, const T&... args) {
+        template <typename ...T> kernel<T...> create_kernel(const char* source_path, const char* kernel_entry, const T&... args) {
             return glpix::kernel<T...>(m_cl_context, m_cl_device, source_path, kernel_entry, args...);
         }
 
-        inline void draw_kernel(const kernel_base& kern) { m_kernel_changed = true; m_active_kernel = kern; }
-        
-        compute_event dispatch_kernel(const kernel_base& kernel, uint work_dim, const size_t* off, const size_t* local, const size_t* global);
-        compute_event dispatch_kernel(const kernel_base& kernel, uint work_dim, const size_t* off, const size_t* local, const size_t* global, const compute_event& wait_for);
+        template <typename T> compute_event write_buffer(const buffer<T>& buffer, 
+                                                         const std::vector<T>& data, 
+                                                         size_t buffer_off = 0, 
+                                                         const compute_event& wait_for = compute_event()) {
+            return write_buffer_internal(buffer, data.count() * sizeof(T), data.data(), buffer_off, wait_for);
+        }
+
+        template <typename T> compute_event write_buffer(const buffer<T>& buffer, 
+                                                         size_t count, T* data, 
+                                                         size_t buffer_off = 0, 
+                                                         const compute_event& wait_for = compute_event()) {
+            return write_buffer_internal(buffer, count * sizeof(T), data, buffer_off, wait_for);
+        }
+
+        template <typename T> compute_event read_buffer(const buffer<T>& buffer, 
+                                                        std::vector<T>& data, 
+                                                        size_t buffer_off = 0, 
+                                                        const compute_event& wait_for = compute_event()) {
+            return read_buffer_internal(buffer, std::min(sizeof(T) * data.size(), buffer.size()), data.data(), buffer_off, wait_for);
+        }
+
+        template <typename T> compute_event read_buffer(const buffer_base& buffer, 
+                                                        size_t count, T* data,
+                                                        size_t buffer_off = 0, 
+                                                        const compute_event& wait_for = compute_event()) {
+            return read_buffer_internal(buffer, std::min(sizeof(T) * count, buffer.size()), data, buffer_off, wait_for);
+        }
 
     private:
         void init_glfw(int w, int h, const std::string& title, bool fullscreen);
@@ -352,6 +428,15 @@ class glpix {
 
         bool dev_has_extension(const cl_device_id& dev, const char* extension);
 
+        compute_event write_buffer_internal(const buffer_base& buffer,
+                                            size_t buffer_size, 
+                                            void* data, size_t buffer_off, 
+                                            const compute_event& wait_for);
+
+        compute_event read_buffer_internal(const buffer_base& buffer,
+                                           size_t buffer_size, 
+                                           void* data, size_t buffer_off, 
+                                           const compute_event& wait_for);                                            
     private:
         /* Interactions */
         std::array<uint64_t, 1024> m_key_buffer {},
@@ -379,3 +464,4 @@ class glpix {
         bool m_kernel_changed = false;
         kernel_base m_active_kernel;
 };
+
