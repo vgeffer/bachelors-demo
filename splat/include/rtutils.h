@@ -10,7 +10,8 @@
 #endif
 
 #define RT_EPSILON 0.00001f
-#define BVH_NUM_CHILDREN 4
+#define BVH_CHILD_STOP_COUNT 16
+#define BVH_STACK_SIZE 32
 #define MIN_CHILDREN_ALPHA_SUM 0.01
 
 typedef struct __attribute__((packed)) _ray {
@@ -19,7 +20,7 @@ typedef struct __attribute__((packed)) _ray {
  
 
 typedef struct __attribute__((packed)) _ray_hit {
-    bool hit;
+    int primitive;
     float distance;
     float4 point;
 } hit;
@@ -29,7 +30,7 @@ typedef struct __attribute__((packed)) _bounding_sphere {
 
     float4 center;
     float rsquared;
-    int children[BVH_NUM_CHILDREN];
+    int cbegin, cend;
     float4 color;
 
 } sphere;

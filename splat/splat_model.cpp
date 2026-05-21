@@ -1,6 +1,8 @@
 #include "splat_model.hpp"
 #include "include/rtutils.h"
+#include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 
 #define SQUARE(x) ((x) * (x))
@@ -13,36 +15,18 @@ void splat_model::refit() {
 }
 
 
-void combine_nodes(int count, int* indices) {
+void splat_model::fit(sphere& bb) {
 
-    if (count > BVH_NUM_CHILDREN)
-        throw std::runtime_error("More than BVH_NUM_CHILDREN passed to combine_nodes");
-
-	float alpha = 0;
-	/* Clamp alpha */
-	if (alpha > 1)
-		alpha = 1;
-
-	fit()
-
-	/* Assign children */
-    int children[BVH_NUM_CHILDREN];
-
-}
-
-void fit(sphere& bb) {
-
-	int child_count = 0;
+	int child_count = bb.cend - bb.cbegin;
+	if (child_count <= 0) return; /* End early as there is nothing to fit */
 
 	/* Recompute origin */
-	for (int child = bb.children[child_count]; child >= 0 && child_count < BVH_NUM_CHILDREN; child_count++) {
-		bb.center.x = nodes[child].center.x;
-		bb.center.y = nodes[child].center.y;
-		bb.center.z = nodes[child].center.z;
-		bb.center.w = nodes[child].center.w;		
+	for (int child = bb.cbegin; child < bb.cend; child++) {
+		bb.center.x += m_tree[child].center.x;
+		bb.center.y += m_tree[child].center.y;
+		bb.center.z += m_tree[child].center.z;
+		bb.center.w += m_tree[child].center.w;		
 	}
-
-	if (child_count <= 0) return; /* Ear*/
 
 	bb.center.x /= child_count; 
 	bb.center.y /= child_count; 
@@ -51,188 +35,95 @@ void fit(sphere& bb) {
 
 	/* Compute the radius */
 	float max_radius = -INFINITY; /* Center + radius */
-	for (int i = 0, child = bb.children[i]; child >= 0 && i <= child_count; i++) {
+	float new_alpha = 0;
+	for (int child = bb.cbegin; child < bb.cend; child++) {
 
 		/* Calculate */
-		float new_radius = sqrt(SQUARE(nodes[child].x - bb.center.x) + 
-								SQUARE(noded[child].y - bb.center.y) + 
-								SQUARE(nodes[child].z - bb.center.z)) + sqrt(nodes[child].rsquared);
+		float new_radius = sqrt(SQUARE(m_tree[child].center.x - bb.center.x) + 
+								SQUARE(m_tree[child].center.y - bb.center.y) + 
+								SQUARE(m_tree[child].center.z - bb.center.z)) + sqrt(m_tree[child].rsquared);
 		max_radius = std::max(max_radius, new_radius);
+
+		new_alpha += m_tree[child].color.w;
+		if (new_alpha > 1) new_alpha = 1;	
 	}
 
 	bb.rsquared = SQUARE(max_radius);
+	bb.color = (float4) { .w = new_alpha };
 }
 
-// Return the bounding sphere of the leaves in positions [begin..end)
-QTree_Node *QTree::rec_build_tree(int begin, int end)
-{
-#ifdef DEBUG
-	if (begin == end) {
-		fprintf(stderr, "Yikes! begin == end in BuildLeaves()\n");
-		return NULL;
-	}
-#endif
+void splat_model::subdivide(sphere& bb) {
+  
+	int child_count = bb.cend - bb.cbegin;
+	//std::cout << " Subdividing: " << child_count << std::endl;
 
-	if (end - begin <= BVH_NUM_CHILDREN)
-		return CombineLeaves(begin, end);
+	if (child_count <= BVH_CHILD_STOP_COUNT) 
+		return;
+  
+  	int axis = 0;
+	
+	/* Get size along axies */
+	cl_float3 size = size_along_axies(bb);
 
-	// Recursive case
-	int middle = Partition(begin, end);
+	//std::cout << "	Sizes along axies: " << size.x << " " << size.y << " " << size.z << std::endl;
 
-	if (middle - begin <= 4) {
-		if (end - middle <= 4) {
-			return CombineNodes(CombineLeaves(begin, middle),
-					    CombineLeaves(middle, end));
-		} else {
-			int m2 = Partition(middle, end);
-			return CombineNodes(CombineLeaves(begin, middle),
-					    BuildLeaves(middle, m2),
-					    BuildLeaves(m2, end));
-		}
-	} else {
-		if (end - middle <= 4) {
-			int m1 = Partition(begin, middle);
-			return CombineNodes(BuildLeaves(begin, m1),
-					    BuildLeaves(m1, middle),
-					    CombineLeaves(middle, end));
-		} else {
-			int m1 = Partition(begin, middle);
-			int m2 = Partition(middle, end);
-			return CombineNodes(BuildLeaves(begin, m1),
-					    BuildLeaves(m1, middle),
-					    BuildLeaves(middle, m2),
-					    BuildLeaves(m2, end));
-		}
-	}
+  	if (size.y > size.x)  axis = 1;
+  	if (size.z > size.s[axis]) axis = 2;
+
+  	float split = bb.center.s[axis];// - sqrt(bb.rsquared) + size.s[axis] * 0.5f;
+	//std::cout << "	Split axis: " << axis << ", split plane: " << split << std::endl;
+
+
+  	int i = bb.cbegin, 
+       	j = bb.cend - 1;
+
+  	while (i <= j) {
+    	if (m_tree[i].center.s[axis] < split) ++i;
+    	else std::swap(m_tree[i], m_tree[j--]);
+  	}
+
+	//std::cout << "	Children left: " << i - bb.cbegin << ", Children right: " << bb.cend - i << std::endl;
+
+
+	/* End splitting if plane would not split children */
+  	if ((i - bb.cbegin) == 0 || (i - bb.cbegin) == child_count) return; 
+
+
+
+	/* Fit first two */
+	m_tree.emplace_back((sphere) { .cbegin = bb.cbegin, .cend = i });
+	m_tree.emplace_back((sphere) { .cbegin = i, .cend = bb.cend });
+	
+	int cbegin = m_tree.size() - 2,
+		cend   = m_tree.size();
+
+	fit(m_tree[cbegin]);
+	fit(m_tree[cbegin + 1]);
+
+	subdivide(m_tree[cbegin]);
+	subdivide(m_tree[cbegin + 1]);
+	
+	bb.cbegin = cbegin; bb.cend = cbegin + 2;
 }
 
+cl_float3 splat_model::size_along_axies(const sphere& bb) {
 
-// Do partitioning on the range [begin..end) of thetree.  Returns index on
-// which we partition (i.e. partitions are [begin..middle) and [middle..end) )
-int QTree::Partition(int begin, int end)
-{
-#ifdef DEBUG
-	if (end - begin <= 4)
-		fprintf(stderr, "end - begin <= 4 in Partition()\n");
-#endif
+	cl_float3 min = (cl_float3) { .x = 0, .y = 0, .z = 0};
+	cl_float3 max = (cl_float3) { .x = 0, .y = 0, .z = 0 };
 
-	float xmin, xmax, ymin, ymax, zmin, zmax;
-	FindBBox(begin, end, xmin, xmax, ymin, ymax, zmin, zmax);
-	float dx = xmax-xmin, dy = ymax-ymin, dz = zmax-zmin;
-	if (!dx && !dy && !dz) {
-#ifdef DEBUG
-		fprintf(stderr, "dx, dy, dz all zero in Partition()\n");
-#endif
-		return (begin+end)/2;
+	for (int child = bb.cbegin; child < bb.cend; child++) {
+
+		float sqradius = sqrt(m_tree[child].rsquared);
+
+		min.x = std::min(min.x, m_tree[child].center.x - sqradius);
+		max.x = std::max(max.x, m_tree[child].center.x + sqradius);
+
+		min.y = std::min(min.y, m_tree[child].center.y - sqradius);
+		max.y = std::max(max.y, m_tree[child].center.y + sqradius);
+
+		min.z = std::min(min.z, m_tree[child].center.z - sqradius);
+		max.z = std::max(max.z, m_tree[child].center.z + sqradius);
 	}
 
-
-	// Split along longest axis
-	int splitaxis;
-	float axis_min, axis_max;
-	if (dx > dy) {
-		if (dx > dz) {
-			splitaxis = 0;
-			axis_min = xmin;  axis_max = xmax;
-		} else {
-			splitaxis = 2;
-			axis_min = zmin;  axis_max = zmax;
-		}
-	} else {
-		if (dy > dz) {
-			splitaxis = 1;
-			axis_min = ymin;  axis_max = ymax;
-		} else {
-			splitaxis = 2;
-			axis_min = zmin;  axis_max = zmax;
-		}
-	}
-
-	float splitval = 0.5f * (axis_min + axis_max);
-	int middle = PartitionAlongAxis(begin, end, splitaxis, splitval);
-
-
-	// If we're down to a small number of nodes, don't try to do
-	// anything fancy, just split along the middle
-	if (end - begin <= 64)
-		return middle;
-
-
-	// Otherwise, try a few more candidate splits
-	splitval = 0.6f * axis_min + 0.4f * axis_max;
-	int mid1 = PartitionAlongAxis(begin, middle, splitaxis, splitval);
-
-	splitval = 0.4f * axis_min + 0.6f * axis_max;
-	int mid2 = PartitionAlongAxis(middle, end, splitaxis, splitval);
-
-	float xmin1, xmax1, ymin1, ymax1, zmin1, zmax1;
-	float xmin2, xmax2, ymin2, ymax2, zmin2, zmax2;
-	float xmin3, xmax3, ymin3, ymax3, zmin3, zmax3;
-	float xmin4, xmax4, ymin4, ymax4, zmin4, zmax4;
-	FindBBox(begin,  mid1,   xmin1, xmax1, ymin1, ymax1, zmin1, zmax1);
-	FindBBox(mid1,   middle, xmin2, xmax2, ymin2, ymax2, zmin2, zmax2);
-	FindBBox(middle, mid2,   xmin3, xmax3, ymin3, ymax3, zmin3, zmax3);
-	FindBBox(mid2,   end,    xmin4, xmax4, ymin4, ymax4, zmin4, zmax4);
-
-	float vol1 = (xmax1-xmin1) * (ymax1-ymin1) * (zmax1-zmin1) +
-		     (max(max(xmax2, xmax3), xmax4) - min(min(xmin2, xmin3), xmin4)) *
-		     (max(max(ymax2, ymax3), ymax4) - min(min(ymin2, ymin3), ymin4)) *
-		     (max(max(zmax2, zmax3), zmax4) - min(min(zmin2, zmin3), zmin4));
-
-	float vol2 = (max(xmax1, xmax2) - min(xmin1, xmin2)) *
-		     (max(ymax1, ymax2) - min(ymin1, ymin2)) *
-		     (max(zmax1, zmax2) - min(zmin1, zmin2))  +
-		     (max(xmax3, xmax4) - min(xmin3, xmin4)) *
-		     (max(ymax3, ymax4) - min(ymin3, ymin4)) *
-		     (max(zmax3, zmax4) - min(zmin3, zmin4));
-	// An even split is desirable, so we give this a slight bonus
-	vol2 *= 0.95f;
-
-	float vol3 = (max(max(xmax1, xmax2), xmax3) - min(min(xmin1, xmin2), xmin3)) *
-		     (max(max(ymax1, ymax2), ymax3) - min(min(ymin1, ymin2), ymin3)) *
-		     (max(max(zmax1, zmax2), zmax3) - min(min(zmin1, zmin2), zmin3))  +
-		     (xmax4-xmin4) * (ymax4-ymin4) * (zmax4-zmin4);
-
-	if (vol1 < vol3) {
-		if (vol1 < vol2) return mid1;
-	} else {
-		if (vol3 < vol2) return mid2;
-	}
-	return middle;
+	return (float3) { .x = fabs(max.x - min.x), .y = fabs(max.y - min.y), .z = fabs(max.z - min.z) };
 }
-
-
-// Partition the range [begin..end) of thetree along the given axis, at the
-// given value.  Returns index on which we partition.
-int QTree::PartitionAlongAxis(int begin, int end, int axis, float splitval)
-{
-	int left = begin, right = end-1;
-
-	while (1) {
-		// March the "left" pointer to the right
-		while (leafptr[left]->pos[axis] < splitval)
-			left++;
-
-		// March the "right" pointer to the left
-		while (leafptr[right]->pos[axis] >= splitval)
-			right--;
-
-		// If the pointers have crossed, we're done
-		if (right < left) {
-#ifdef DEBUG
-			if (left == begin) {
-				fprintf(stderr, "Yikes! left == begin in PartitionAlongAxis()\n");
-				left++;
-			} else if (left == end) {
-				fprintf(stderr, "Yikes! left == end in PartitionAlongAxis()\n");
-				left--;
-			}
-#endif
-			return left;
-		}
-
-		// Else, swap and repeat
-		swap(leafptr[left], leafptr[right]);
-	}
-}
-

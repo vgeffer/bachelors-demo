@@ -34,7 +34,7 @@ bool raytracer::create() {
     openvdb::initialize();
 
     /* Init Camera */
-    m_c = camera(vec4(0, 0, -20, 1), glm::radians(90.0f), 5, static_cast<float>(win_width()) / static_cast<float>(win_height()));
+    m_c = camera(vec4(0, 0, -200, 1), glm::radians(90.0f), 5, static_cast<float>(win_width()) / static_cast<float>(win_height()));
 
     /* Load OpenVDB File */
     openvdb::io::File file = openvdb::io::File("cloud-lores.vdb");
@@ -115,7 +115,7 @@ bool raytracer::update(float delta) {
     write_buffer(m_camera_buffer, 4, &cam).await();
     auto [p0, p1, p2] = m_c.view_vectors();
     
-    m_test_kernel.set_arg<4>(time() * 64);
+    m_test_kernel.set_arg<3>(time() * 64);
 
     return true;
 }

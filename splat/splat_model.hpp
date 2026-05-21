@@ -4,6 +4,7 @@
 #include "include/rtutils.h"
 #include <cmath>
 #include <ostream>
+#include <queue>
 #include <stdexcept>
 #include <vector>
 
@@ -48,7 +49,7 @@ class splat_model {
                                     .x = static_cast<cl_float>(coords.x()), .y = static_cast<cl_float>(coords.y()), 
                                     .z = static_cast<cl_float>(coords.z()), .w = 1.0f 
                                 }, 
-                                .rsquared = SPHERE_RADIUS_SQR*2, .children = {-1, -1, -1, -1},
+                                .rsquared = SPHERE_RADIUS_SQR, .cbegin = -1, .cend = -1,
                                 .color = (cl_float4) { .x = randf(), .y = randf(), .z = randf(), .w = *iter }
                             });
                     }
@@ -75,7 +76,34 @@ class splat_model {
             lm.reduce(prune_op, false);
 
             /* Build the rest of the tree */
-            std::cout << "Built " << m_tree.size() << " leafs from " << lm.activeLeafVoxelCount() << " voxels" << std::endl;
+            int child_count = m_tree.size();
+            std::cout << "Built " << child_count << " leafs from " << lm.activeLeafVoxelCount() << " voxels" << std::endl;
+
+            m_tree.emplace(m_tree.cbegin(), (sphere) { .cbegin = 1, .cend = child_count + 1});
+
+            fit(m_tree.front());
+            subdivide(m_tree.front());
+            std::cout << "BVH now has " << m_tree.size() << " nodes" << std::endl;
+
+
+
+
+            /* Debug print tree */ 
+            int depth = 0;
+            std::queue<std::pair<int, int>> queue;
+            queue.emplace(0, 0);
+
+            while (!queue.empty()) {
+                auto [node, depth] = queue.front();
+                queue.pop();
+                
+                if (m_tree[node].cend - m_tree[node].cbegin > 0)
+                    std::cout << "Depth " << depth << ", child count: " << m_tree[node].cend - m_tree[node].cbegin
+                              << ", children: " << m_tree[node].cbegin << " - " << m_tree[node].cend << std::endl;
+                for (int i = m_tree[node].cbegin; i < m_tree[node].cend; i++) {
+                    queue.emplace(i, depth + 1);
+                }
+            }
         }
 
         bool is_valid() const noexcept { return m_tree.size() > 0; } 
@@ -84,8 +112,11 @@ class splat_model {
         void refit();
 
     private:
-
+        void subdivide(sphere& bb);
         void fit(sphere& bb);
+
+        cl_float3 size_along_axies(const sphere& bb);
+
 
         std::vector<sphere> m_tree;
 };
