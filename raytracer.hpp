@@ -2,7 +2,6 @@
 
 #include "lib/glpix.hpp"
 #include <glm/glm.hpp>
-#include <vector>
 #include "camera.hpp"
 #include "lib/tiny_bvh/tiny_bvh.h"
 #include "splat/include/rtutils.h"
@@ -14,7 +13,7 @@
 /* for demo - AABB node */
 class raytracer : public glpix {
     public:
-      raytracer();
+      raytracer(int benchmark_length, const char* model);
 
     private:
         bool create() override;   
@@ -25,12 +24,13 @@ class raytracer : public glpix {
     
     private:
         camera m_c;
-        glpix::kernel<cl_mem, cl_mem, cl_mem, int, float, int, int> m_test_kernel;
+        glpix::kernel<cl_mem, cl_mem, cl_mem, int, float, int, int> m_trace_kernel;
         glpix::buffer<camera::gpu_struct> m_camera_buffer;
         glpix::buffer<sphere> m_bvh;
 
-
         splat_model m_model;
+        int m_benchmark_length;
+        const std::string m_model_path;
 
         uint root = 0, used = 1;
 };

@@ -34,7 +34,7 @@ hit splat_trace(__global const sphere* tree, const ray r, const int sid) {
 	const sphere s = tree[sid];
 
 	/* Splats will always be parallel to the screen */
-	float4 normal = normalize(r.origin - s.center); 
+	float4 normal = r.origin - s.center; 
 
 	/* Ray-Plane intersection */
 	float denom = dot(r.dir, normal);	
@@ -56,8 +56,8 @@ void hswap(hit* buffer, int a, int b) {
 inline void update_hit_array(const hit h, const int k, hit* hits) {
 
 	/* It is a hit and hit is closer than the furthest hit */
-	if (h.primitive >= 0 && h.distance < hits[k - 1].distance) {
-			
+	if (h.primitive >= 0 && h.distance < hits[k - 1].distance) {	
+		
 		/* Place hit into array and then move to place */
 		hits[k - 1] = h;
 
@@ -69,9 +69,9 @@ inline void update_hit_array(const hit h, const int k, hit* hits) {
 	}
 }
 
-bool heuristic() { return false; }
+bool heuristic(float hit) { return false; }
 
-void trace_k_nearest(__global const sphere* tree, const ray r, const int k, hit* hits, const int root, const bool clean) {
+bool trace_k_nearest(__global const sphere* tree, const ray r, const int k, hit* hits, const int root, const bool clean) {
 
 	/* Prepare data for algorithms - only if neceseary */
 	for (int i = 0; i < k && clean; i++) {
@@ -81,6 +81,8 @@ void trace_k_nearest(__global const sphere* tree, const ray r, const int k, hit*
 	/* Tracing stack */
 	MAKE_STACK(int, BVH_STACK_SIZE);
 	STACK_PUSH(root);
+
+	float alpha_accum = 0;
 
 	/* Do BVH traversal */
 	while (!STACK_IS_EMPTY()) {
@@ -99,21 +101,30 @@ void trace_k_nearest(__global const sphere* tree, const ray r, const int k, hit*
 		/* Go through all the children */
 		for (int child = tree[node].cbegin; child < tree[node].cend; child++) {
 
+			if (alpha_accum >= 0.95f) {
+				update_hit_array((hit) { .primitive = 0, .distance = 0 }, k, hits); 
+				return true; /* Return and force exit as this ray will be opaque */
+			}
+
 			/* Prevent unneceseary expansion of leaves */
-			if (tree[child].cbegin < 0) {
+			if (tree[child].cbegin < 0 || heuristic(t)) {
 
 				/* Child node */
 				hit h = splat_trace(tree, r, child);
 				update_hit_array(h, k, hits); /* Hit might get discarded here */
 
+				if (h.primitive >= 0)
+					alpha_accum += tree[child].color.w;
+
 				continue; /* Go to next child */
 			}
 
 			/* Otherwise expand node recursively */
-			if (STACK_IS_FULL()) trace_k_nearest(tree, r, k, hits, child, false);
+			if (STACK_IS_FULL()) { if (trace_k_nearest(tree, r, k, hits, child, false)) return true; } /* Propagate message upwards */
 			else STACK_PUSH(child);
 		}
 	}
+	return false;
 }
 
 __kernel void raymarch(write_only image2d_t out_img, 
@@ -139,22 +150,26 @@ __kernel void raymarch(write_only image2d_t out_img,
 		float alpha = 0;
 		const int K = 16;
 		hit hits[K];
+		while(alpha < 0.95f) {
 
-		while (alpha < 0.95f) {
 			trace_k_nearest(tree, r, K, hits, 0, true);
 
-			if (hits[0].primitive < 0) /* There are no more hits, end algo */
-				break; 
+			if (hits[0].primitive < 0)
+				break;
 
 			int i = 0;
 			for (; i < K && hits[i].primitive >= 0 && alpha < 1; i++)
-				alpha += tree[hits[i].primitive].color.w;			
+				alpha += tree[hits[i].primitive].color.w;
 
-			r.origin = hits[i - 1].point; /* Continue tracing from furthest point */
+
+			if (hits[K - 1].primitive < 0)
+				break;
+			r.origin = hits[K - 1].point; 	
 		}
 
-		//const float4 sky = (float4)(0.52, 0.8, 0.92, 1);
-		float4 blended_sky = (float4)(1, 1, 1, 1) * alpha + r.dir * (1 - alpha);
+		if (alpha > 1) alpha = 1;
+		const float4 sky = (float4)(0.52, 0.8, 0.92, 1);
+		float4 blended_sky = (float4)(1, 1, 1, 1) * alpha + sky * (1 - alpha);
 
 		write_imagef(out_img, (int2)(x, y), blended_sky);
     }

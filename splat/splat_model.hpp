@@ -1,8 +1,11 @@
 #pragma once
 #include "../utils/progress_bar.hpp"
+#include "../utils/progress_counter.hpp"
 #include "../lib/glpix.hpp"
 #include "include/rtutils.h"
+#include <CL/cl_platform.h>
 #include <cmath>
+#include <openvdb/Types.h>
 #include <ostream>
 #include <queue>
 #include <stdexcept>
@@ -33,11 +36,11 @@ class splat_model {
 
                 template <typename LeafNodeType>
                 void operator()(LeafNodeType &leaf, size_t) {
-        
+
                     typename LeafNodeType::ValueOnIter iter = leaf.beginValueOn();
+                    iter = leaf.beginValueOn();
                     for (; iter; ++iter) {
                         m_bar.increment_work();
-
                         if (*iter < m_epsilon)
                             continue; 
                         
@@ -50,7 +53,7 @@ class splat_model {
                                     .z = static_cast<cl_float>(coords.z()), .w = 1.0f 
                                 }, 
                                 .rsquared = SPHERE_RADIUS_SQR, .cbegin = -1, .cend = -1,
-                                .color = (cl_float4) { .x = randf(), .y = randf(), .z = randf(), .w = *iter }
+                                .count = 1, .alpha = *iter
                             });
                     }
                 }
@@ -58,6 +61,7 @@ class splat_model {
             void join(const vdb_leaf_generator_op &other) { throw new std::logic_error("Parallel building not yet implemented"); }
 
         private:
+
             progress_bar m_bar;
             std::vector<sphere>& m_leafs;
             const float m_epsilon = -INFINITY;
@@ -77,29 +81,46 @@ class splat_model {
 
             /* Build the rest of the tree */
             int child_count = m_tree.size();
-            std::cout << "Built " << child_count << " leafs from " << lm.activeLeafVoxelCount() << " voxels" << std::endl;
 
-            m_tree.emplace(m_tree.cbegin(), (sphere) { .cbegin = 1, .cend = child_count + 1});
+            /* Measure time */
+            std::chrono::system_clock::time_point tp_start = std::chrono::system_clock::now(), 
+                                                  tp_end;
 
-            fit(m_tree.front());
-            subdivide(m_tree.front());
-            std::cout << "BVH now has " << m_tree.size() << " nodes" << std::endl;
+            m_tree.emplace(m_tree.begin()); /* Create empty space at the beginning for the root node */
+            m_bvh_build_counter = progress_counter(" nodes built", "Building BVH: ");
+            
+            sphere root = (sphere) { .cbegin = 1, .cend = child_count + 1 };
+            fit(root);
+            subdivide(root);
 
-
-
+            m_tree[0] = root;
+            m_bvh_build_counter.end_work();            
+        
+            tp_end = std::chrono::system_clock::now();
+            std::cout << "Building BVH took: " << std::chrono::duration_cast<std::chrono::milliseconds>(tp_end - tp_start).count() / 1000.0f << "s" << std::endl;
 
             /* Debug print tree */ 
-            int depth = 0;
+            int current_depth = 0, count = 0, leafs = 0;
+            float node_ccount = 0;
             std::queue<std::pair<int, int>> queue;
             queue.emplace(0, 0);
+
 
             while (!queue.empty()) {
                 auto [node, depth] = queue.front();
                 queue.pop();
+
+                if (current_depth != depth) {
+                    std::cerr << "At depth: " << current_depth << " - nodes: " << count - leafs << "(" << node_ccount / (count - leafs) << ")" << ", leafs: " << leafs << std::endl;
+                    current_depth = depth;
+                    count = leafs = 0;
+                    node_ccount = 0;
+                }
+                count++;
+                    
+                if (m_tree[node].cbegin < 0) leafs++;
+                else node_ccount += m_tree[node].cend - m_tree[node].cbegin;
                 
-                if (m_tree[node].cend - m_tree[node].cbegin > 0)
-                    std::cout << "Depth " << depth << ", child count: " << m_tree[node].cend - m_tree[node].cbegin
-                              << ", children: " << m_tree[node].cbegin << " - " << m_tree[node].cend << std::endl;
                 for (int i = m_tree[node].cbegin; i < m_tree[node].cend; i++) {
                     queue.emplace(i, depth + 1);
                 }
@@ -117,7 +138,7 @@ class splat_model {
 
         cl_float3 size_along_axies(const sphere& bb);
 
-
+        progress_counter m_bvh_build_counter;
         std::vector<sphere> m_tree;
 };
 

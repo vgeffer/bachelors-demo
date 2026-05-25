@@ -2,6 +2,7 @@
 #include "glpix.hpp"
 
 #include <chrono>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -184,7 +185,7 @@ void glpix::start() {
             
             m_kernel_changed = false;
 
-            std::cout << "Kernel changed, recomputing work groups: \n"
+            std::cerr << "Kernel changed, recomputing work groups: \n"
                       << "Local work groups size: x=" << local_work_size[0] << ", y=" << local_work_size[1] << "\n"
                       << "Global work groups size: x=" << global_work_size[0] << ", y=" << global_work_size[1] << std::endl;
         }

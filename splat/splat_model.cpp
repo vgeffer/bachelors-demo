@@ -44,12 +44,12 @@ void splat_model::fit(sphere& bb) {
 								SQUARE(m_tree[child].center.z - bb.center.z)) + sqrt(m_tree[child].rsquared);
 		max_radius = std::max(max_radius, new_radius);
 
-		new_alpha += m_tree[child].color.w;
+		new_alpha += m_tree[child].alpha;
 		if (new_alpha > 1) new_alpha = 1;	
 	}
 
 	bb.rsquared = SQUARE(max_radius);
-	bb.color = (float4) { .w = new_alpha };
+	bb.alpha = new_alpha;
 }
 
 void splat_model::subdivide(sphere& bb) {
@@ -65,45 +65,96 @@ void splat_model::subdivide(sphere& bb) {
 	/* Get size along axies */
 	cl_float3 size = size_along_axies(bb);
 
-	//std::cout << "	Sizes along axies: " << size.x << " " << size.y << " " << size.z << std::endl;
-
   	if (size.y > size.x)  axis = 1;
   	if (size.z > size.s[axis]) axis = 2;
 
-  	float split = bb.center.s[axis];// - sqrt(bb.rsquared) + size.s[axis] * 0.5f;
-	//std::cout << "	Split axis: " << axis << ", split plane: " << split << std::endl;
+  	float best_split = bb.center.s[axis]; //default to center
+	float best_heuristic = INFINITY;
 
+	#if defined(BVH_MC_SAH)
+	std::vector<sphere> random_children;
+	std::sample(m_tree.begin() + bb.cbegin, m_tree.begin() + bb.cend, std::back_inserter(random_children), 
+				std::min(child_count, 10000), std::mt19937 {std::random_device{}()});
+
+	for (int eval_axis = 0; eval_axis < 3; eval_axis++) {
+		for (float i = 1; i <= 16; i++) {
+		
+			float split = bb.center.s[eval_axis] - sqrt(bb.rsquared) + i /16 * size.s[eval_axis];
+			sphere lchild = {.rsquared = 0, .count = 0 }, rchild = { .rsquared = 0, .count = 0 };
+
+			for (const auto& child : random_children) {
+				if (child.center.s[eval_axis] < split)
+					lchild.grow(child);
+				else
+					rchild.grow(child);
+			}
+		
+			float cost = lchild.rsquared * lchild.count + rchild.rsquared * rchild.count;
+			if (cost < best_heuristic && cost > 0) {
+
+				best_heuristic = cost;
+				best_split = split;
+				axis = eval_axis;
+			}
+		}
+	}
+	#else
+	for (int eval_axis = 0; eval_axis < 3; eval_axis++) {
+		for (float i = 1; i <= 16; i++) {
+		
+			float split = bb.center.s[eval_axis] - sqrt(bb.rsquared) + i /16 * size.s[eval_axis];
+			sphere lchild = {.rsquared = 0, .count = 0 }, rchild = { .rsquared = 0, .count = 0 };
+			
+			for (int child = bb.cbegin; child < bb.cend; child++) {
+				if (m_tree[child].center.s[eval_axis] < split)
+					lchild.grow(m_tree[child]);
+				else
+					rchild.grow(m_tree[child]);
+			}
+
+			float cost = lchild.rsquared * lchild.count + rchild.rsquared * rchild.count;
+			if (cost < best_heuristic && cost > 0) {
+
+				best_heuristic = cost;
+				best_split = split;
+				axis = eval_axis;
+			}
+		}
+	}
+
+	#endif
 
   	int i = bb.cbegin, 
        	j = bb.cend - 1;
 
   	while (i <= j) {
-    	if (m_tree[i].center.s[axis] < split) ++i;
-    	else std::swap(m_tree[i], m_tree[j--]);
+    	if (m_tree.at(i).center.s[axis] < best_split) ++i;
+    	else std::swap(m_tree.at(i), m_tree.at(j--));
   	}
-
-	//std::cout << "	Children left: " << i - bb.cbegin << ", Children right: " << bb.cend - i << std::endl;
-
 
 	/* End splitting if plane would not split children */
   	if ((i - bb.cbegin) == 0 || (i - bb.cbegin) == child_count) return; 
 
+	sphere lchild = (sphere) { .cbegin = bb.cbegin, .cend = i };
+	sphere rchild = (sphere) { .cbegin = i, .cend = bb.cend };
 
+	fit(lchild);
+	fit(rchild);
 
-	/* Fit first two */
-	m_tree.emplace_back((sphere) { .cbegin = bb.cbegin, .cend = i });
-	m_tree.emplace_back((sphere) { .cbegin = i, .cend = bb.cend });
+	m_bvh_build_counter.increment_work();
+	subdivide(lchild);
+	m_bvh_build_counter.increment_work();
+	subdivide(rchild);
+
+	/* Append nodes */
+	m_tree.emplace_back(lchild);
+	m_tree.emplace_back(rchild);
 	
 	int cbegin = m_tree.size() - 2,
 		cend   = m_tree.size();
 
-	fit(m_tree[cbegin]);
-	fit(m_tree[cbegin + 1]);
-
-	subdivide(m_tree[cbegin]);
-	subdivide(m_tree[cbegin + 1]);
-	
-	bb.cbegin = cbegin; bb.cend = cbegin + 2;
+	bb.cbegin = cbegin; 
+	bb.cend = cbegin + 2;
 }
 
 cl_float3 splat_model::size_along_axies(const sphere& bb) {
