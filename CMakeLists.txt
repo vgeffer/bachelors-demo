@@ -28,8 +28,6 @@ add_executable(raytracer
     "lib/glad/khrplatform.h"
     "lib/glpix.hpp"
     "lib/glpix.cpp"
-    "lib/tiny_bvh/tiny_bvh.h"
-    "lib/tiny_bvh/tiny_bvh.cpp"
     "splat/include/rtutils.h"
     "splat/splat_model.cpp"
     "splat/splat_model.hpp"
