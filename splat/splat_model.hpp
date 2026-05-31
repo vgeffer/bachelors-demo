@@ -6,6 +6,7 @@
 #include <cmath>
 #include <ostream>
 #include <stdexcept>
+#include <queue>
 #include <vector>
 
 #if defined(PLATFORM_UNIX)

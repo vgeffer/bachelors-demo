@@ -3,7 +3,6 @@
 #include "lib/glpix.hpp"
 #include <glm/glm.hpp>
 #include "camera.hpp"
-#include "lib/tiny_bvh/tiny_bvh.h"
 #include "splat/include/rtutils.h"
 #include "splat/splat_model.hpp"
 

@@ -8,7 +8,6 @@
 #include <string>
 #include "raytracer.hpp"
 
-#include "lib/tiny_bvh/tiny_bvh.h"
 #include "splat/include/rtutils.h"
 #include "splat/splat_model.hpp"
 
@@ -31,7 +30,7 @@ bool raytracer::create() {
     openvdb::initialize();
 
     /* Init Camera */
-    m_c = camera(vec4(0, 0, -800, 1), glm::radians(70.0f), 5, static_cast<float>(win_width()) / static_cast<float>(win_height()));
+    m_c = camera(vec4(0, 0, -200, 1), glm::radians(70.0f), 5, static_cast<float>(win_width()) / static_cast<float>(win_height()));
     m_c.rot(vec4(0, glm::radians(180.0f), 0, 0));
 
     /* Load OpenVDB File */
@@ -70,7 +69,7 @@ bool raytracer::create() {
     if (m_benchmark_length > 0) {
         std::cerr << "Benchmarking mode turned on. Application will output FPS with timestamp in a CSV format to the stdout.\nApplication will also auto-close after "
                   <<  m_benchmark_length << " minutes!" << std::endl;
-        std::cout << "TIME,FPS" << std::endl;
+        std::cout << "TIMESTAMP,FRAMETIME,FPS" << std::endl;
     }
 
     set_draw_kernel(m_trace_kernel);
@@ -88,7 +87,7 @@ bool raytracer::update(float delta) {
         ++frames;
         counter += delta;
         if (counter >= 5.0f) {
-            std::cout << time() << "," << frames / counter << std::endl;
+            std::cout << time() << "," << (counter / frames) * 1000 << "," << (frames / counter) << std::endl;
             counter = 0.0f;
             frames = 0;
         }
