@@ -23,6 +23,8 @@ Program is invoked as ```raytracer [model] (flags)```. Model (in .vdb format, mu
 > [!NOTE]
 > Model must contain grid named "density" to be properly parsed. This application was tested using [Walt Disney Animation Studio's dataset](https://www.disneyanimation.com/resources/clouds/).
 
+> [!IMPORTANT]
+> On some platforms there are problems with OpenCL #include resolution. In such case, expand the includes manually.
 
 ## Acknowledgements
 This project uses and redistributes [```glad```](https://github.com/Dav1dde/glad) OpenGL Loader <br />
