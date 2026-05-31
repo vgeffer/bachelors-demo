@@ -3,11 +3,8 @@
 #include "../utils/progress_counter.hpp"
 #include "../lib/glpix.hpp"
 #include "include/rtutils.h"
-#include <CL/cl_platform.h>
 #include <cmath>
-#include <openvdb/Types.h>
 #include <ostream>
-#include <queue>
 #include <stdexcept>
 #include <vector>
 
@@ -18,27 +15,68 @@
     #include <OpenVDB/tools/NodeVisitor.h>
 #endif
 
-#define SPHERE_RADIUS_SQR 0.75 
+#define SPHERE_RADIUS_SQR 0.75f
+#define CLOUD_LA_LENGTH 100
 
 inline float randf() { return (static_cast<float>(rand() % 65536) / 65536.0f); }
 
 class splat_model {
 
     private:
-        struct vdb_leaf_generator_op {
+        struct vdb_bbox_size_op {
             public: 
-                vdb_leaf_generator_op(std::vector<sphere>& leafs, progress_bar bar = progress_bar(), float epsilon = -INFINITY) 
-                    : m_bar(bar), m_leafs(leafs), m_epsilon(epsilon) {}
-                vdb_leaf_generator_op(const vdb_leaf_generator_op& other) 
-                    : m_bar(other.m_bar), m_leafs(other.m_leafs), m_epsilon(other.m_epsilon) {}
-                vdb_leaf_generator_op(const vdb_leaf_generator_op& other, tbb::split) 
-                    : m_bar(other.m_bar), m_leafs(other.m_leafs), m_epsilon(other.m_epsilon) {}
+                vdb_bbox_size_op(progress_bar bar = progress_bar(), float epsilon = -INFINITY) 
+                    : m_bar(bar), m_epsilon(epsilon) {}
+                vdb_bbox_size_op(const vdb_bbox_size_op& other) 
+                    : m_min(other.m_min), m_max(other.m_max), m_bar(other.m_bar), m_epsilon(other.m_epsilon) {}
+                vdb_bbox_size_op(const vdb_bbox_size_op& other, tbb::split) 
+                    : m_min(other.m_min), m_max(other.m_max), m_bar(other.m_bar), m_epsilon(other.m_epsilon) {}
 
                 template <typename LeafNodeType>
                 void operator()(LeafNodeType &leaf, size_t) {
 
                     typename LeafNodeType::ValueOnIter iter = leaf.beginValueOn();
-                    iter = leaf.beginValueOn();
+                    
+                    for (; iter; ++iter) {
+                        m_bar.increment_work();
+                        if (*iter < m_epsilon)
+                            continue; 
+
+                        auto coords = iter.getCoord();
+                        m_min.x = std::min(m_min.x, static_cast<cl_float>(coords.x()));
+		                m_max.x = std::max(m_max.x, static_cast<cl_float>(coords.x()));
+		                m_min.y = std::min(m_min.y, static_cast<cl_float>(coords.y()));
+		                m_max.y = std::max(m_max.y, static_cast<cl_float>(coords.y()));
+		                m_min.z = std::min(m_min.z, static_cast<cl_float>(coords.z()));
+		                m_max.z = std::max(m_max.z, static_cast<cl_float>(coords.z()));
+                    }
+                }
+
+            void join(const vdb_bbox_size_op &other) { throw new std::logic_error("Parallel building not yet implemented"); }
+            const cl_float3& min() const noexcept { return m_min; }
+            const cl_float3& max() const noexcept { return m_max; }
+
+        private:
+            cl_float3 m_min = (cl_float4) { .x = INFINITY, .y = INFINITY, .z = INFINITY }, 
+                      m_max = (cl_float4) { .x = -INFINITY, .y = -INFINITY, .z = -INFINITY };
+
+            progress_bar m_bar;
+            const float m_epsilon = -INFINITY;
+        };
+
+        struct vdb_leaf_generator_op {
+            public: 
+                vdb_leaf_generator_op(std::vector<sphere>& leafs, progress_bar bar = progress_bar(), float epsilon = -INFINITY, float scale = 1) 
+                    : m_bar(bar), m_leafs(leafs), m_epsilon(epsilon), m_scale(scale) {}
+                vdb_leaf_generator_op(const vdb_leaf_generator_op& other) 
+                    : m_bar(other.m_bar), m_leafs(other.m_leafs), m_epsilon(other.m_epsilon), m_scale(other.m_scale) {}
+                vdb_leaf_generator_op(const vdb_leaf_generator_op& other, tbb::split) 
+                    : m_bar(other.m_bar), m_leafs(other.m_leafs), m_epsilon(other.m_epsilon), m_scale(other.m_scale) {}
+
+                template <typename LeafNodeType>
+                void operator()(LeafNodeType &leaf, size_t) {
+
+                    typename LeafNodeType::ValueOnIter iter = leaf.beginValueOn();
                     for (; iter; ++iter) {
                         m_bar.increment_work();
                         if (*iter < m_epsilon)
@@ -49,10 +87,10 @@ class splat_model {
                         m_leafs.emplace_back(
                             (sphere) {
                                 .center = (cl_float4) { 
-                                    .x = static_cast<cl_float>(coords.x()), .y = static_cast<cl_float>(coords.y()), 
-                                    .z = static_cast<cl_float>(coords.z()), .w = 1.0f 
+                                    .x = static_cast<cl_float>(coords.x()) * m_scale, .y = static_cast<cl_float>(coords.y()) * m_scale, 
+                                    .z = static_cast<cl_float>(coords.z()) * m_scale, .w = 1.0f 
                                 }, 
-                                .rsquared = SPHERE_RADIUS_SQR, .cbegin = -1, .cend = -1,
+                                .rsquared = SPHERE_RADIUS_SQR * m_scale * m_scale, .cbegin = -1, .cend = -1,
                                 .count = 1, .alpha = *iter
                             });
                     }
@@ -64,8 +102,7 @@ class splat_model {
 
             progress_bar m_bar;
             std::vector<sphere>& m_leafs;
-            const float m_epsilon = -INFINITY;
-            int counter = 0;
+            const float m_epsilon = -INFINITY, m_scale = 1;
     };
 
     public:
@@ -75,9 +112,15 @@ class splat_model {
             openvdb::tree::LeafManager<TreeType> lm = openvdb::tree::LeafManager<TreeType>(vdb_tree); 
             m_tree.reserve(lm.activeLeafVoxelCount() / 2);
 
+            /* get BBox to allow for rescaling */
+            progress_bar bbox_bar = progress_bar(lm.activeLeafVoxelCount(), "Creating cloud's binding box:");
+            vdb_bbox_size_op bbox_op(bbox_bar, RT_EPSILON);
+            lm.reduce(bbox_op, false);
+            float scale = get_scale_const(bbox_op.min(), bbox_op.max(), CLOUD_LA_LENGTH);
+
             progress_bar alpha_bar = progress_bar(lm.activeLeafVoxelCount(), "Generating leafs from VDB:");
-            vdb_leaf_generator_op prune_op(m_tree, alpha_bar, RT_EPSILON);
-            lm.reduce(prune_op, false);
+            vdb_leaf_generator_op leaf_op(m_tree, alpha_bar, RT_EPSILON, scale);
+            lm.reduce(leaf_op, false);
 
             /* Build the rest of the tree */
             int child_count = m_tree.size();
@@ -135,7 +178,7 @@ class splat_model {
     private:
         void subdivide(sphere& bb);
         void fit(sphere& bb);
-
+        float get_scale_const(const cl_float3& bbox_min, const cl_float3& bbox_max, float longest_axis);
         cl_float3 size_along_axies(const sphere& bb);
 
         progress_counter m_bvh_build_counter;

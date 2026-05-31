@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 #define SQUARE(x) ((x) * (x))
 
@@ -14,6 +15,11 @@ void splat_model::refit() {
 	throw std::logic_error("Not Implemented!");
 }
 
+
+static float distsq(cl_float4 a, cl_float4 b) {
+
+	return SQUARE(a.x - b.x) + SQUARE(a.y - b.y) + SQUARE(a.z + b.z);	
+}
 
 void splat_model::fit(sphere& bb) {
 
@@ -156,6 +162,18 @@ void splat_model::subdivide(sphere& bb) {
 	bb.cbegin = cbegin; 
 	bb.cend = cbegin + 2;
 }
+
+float splat_model::get_scale_const(const cl_float3& bbox_min, const cl_float3& bbox_max, float longest_axis) {
+
+	/* Get the longest axis of the model */
+	float axis_max = bbox_max.s[0] - bbox_min.s[0];
+
+	if (bbox_max.s[1] - bbox_min.s[1] > axis_max) { axis_max = bbox_max.s[1] - bbox_min.s[1]; }
+	if (bbox_max.s[2] - bbox_min.s[2] > axis_max) { axis_max = bbox_max.s[2] - bbox_min.s[1]; }
+
+	return longest_axis / axis_max; /* Calculate how much the model needs to be scaled so it's longest axis is longest_axis long */
+}
+
 
 cl_float3 splat_model::size_along_axies(const sphere& bb) {
 

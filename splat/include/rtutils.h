@@ -1,11 +1,10 @@
 #pragma once
 
-#include <glm/ext/quaternion_exponential.hpp>
-#include <glm/geometric.hpp>
+
 #if defined (__cplusplus) 
 
     #include "../../lib/glpix.hpp"
-    #include <glm/ext/vector_float4.hpp>
+    #include <glm/glm.hpp>
     #include <cmath>
 
 
