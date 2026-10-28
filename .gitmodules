@@ -1,0 +1,4 @@
+[submodule "Lib/Engine"]
+	path = Lib/Engine
+	url = git@github.com:vgeffer/pgr-engine.git
+	branch = devel
