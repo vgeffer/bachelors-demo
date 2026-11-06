@@ -42,6 +42,7 @@
 
 # Build Directory
 .cache
+.vs
 build
 
 # Non-Code Resource Files
