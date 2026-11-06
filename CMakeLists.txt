@@ -10,3 +10,19 @@ add_subdirectory(Lib/Engine)
 add_executable(demo entry.cpp)
 target_include_directories(demo PRIVATE Lib/Engine)
 target_link_libraries(demo PgrEngine::Engine)
+
+# Copy Engine's dll to the exe (Windows only)
+if (WIN32)
+    add_custom_command(TARGET demo POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:PgrEngine::Engine>
+            $<TARGET_FILE_DIR:demo>
+    )
+endif()
+
+# Copy assets to the executable
+add_custom_command(TARGET demo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/Assets
+        $<TARGET_FILE_DIR:demo>/Assets
+)
